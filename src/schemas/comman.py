@@ -14,7 +14,6 @@ class Competency(BaseModel):
 class ApprovalStatus(str, enum.Enum):
     DRAFT = "draft"
     PENDING = "pending"
-    IN_REVIEW = "in_review"
     APPROVED = "approved"
     REJECTED = "rejected"
 

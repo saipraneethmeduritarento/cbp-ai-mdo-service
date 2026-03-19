@@ -36,7 +36,7 @@ async def get_approval_requests(
     page: int = Query(1, ge=1, description="Page number (starts from 1)"),
     page_size: int = Query(10, ge=1, le=100, description="Number of items per page"),
     search: Optional[str] = Query(None, description="Search by request name or state/center name"),
-    status_filter: Optional[str] = Query(None, description="Filter by status (pending, IN_REVIEW, approved, rejected)"),
+    status_filter: Optional[str] = Query(None, description="Filter by status (pending, approved, rejected)"),
     from_date: Optional[str] = Query(None, description="Filter from date (YYYY-MM-DD)"),
     to_date: Optional[str] = Query(None, description="Filter to date (YYYY-MM-DD)"),
     db: AsyncSession = Depends(get_db_session)
@@ -96,7 +96,6 @@ async def get_approval_request_detail(
 ):
     """
     Get detailed view of a specific approval request with all items.
-    Automatically updates status to 'IN_REVIEW' if currently 'pending'.
     """
     try:
         stmt = select(ApprovalRequestRead).where(
@@ -113,32 +112,6 @@ async def get_approval_request_detail(
             )
 
         logger.info(f"Current request status: '{request.status}' for request {request_id}")
-
-        # Check if status needs to be updated (case-insensitive comparison)
-        if request.status.upper() == "PENDING":
-            logger.info(f"Updating request {request_id} status from '{request.status}' to 'IN_REVIEW'")
-            
-            # Use text() to cast the enum value properly for PostgreSQL
-            update_stmt = (
-                update(ApprovalRequestRead)
-                .where(ApprovalRequestRead.id == request_id)
-                .values(
-                    status=text("'IN_REVIEW'::approval_status_enum"),
-                    reviewed_at=datetime.now(timezone.utc),
-                    updated_at=datetime.now(timezone.utc)
-                )
-            )
-            await db.execute(update_stmt)
-            await db.commit()
-            
-            # Fetch the updated request to ensure we have the latest status
-            stmt = select(ApprovalRequestRead).where(
-                ApprovalRequestRead.id == request_id,
-                ApprovalRequestRead.mdo_id == mdo_id
-            )
-            result = await db.execute(stmt)
-            request = result.scalar_one()
-            logger.info(f"Successfully updated request {request_id} status to '{request.status}'")
 
         return ApprovalRequestDetail.model_validate(request)
 
@@ -176,10 +149,10 @@ async def approve_request(
                 detail="Approval request not found or access denied"
             )
 
-        if request.status != "IN_REVIEW":
+        if request.status != "PENDING":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot approve request with status '{request.status}'. Must be 'IN_REVIEW'. Please view the request details first to update status."
+                detail=f"Cannot approve request with status '{request.status}'. Must be 'pending'."
             )
 
         # Get all items in the request for approval
@@ -269,10 +242,10 @@ async def reject_request(
                 detail="Approval request not found or access denied"
             )
 
-        if request.status != "IN_REVIEW":
+        if request.status != "PENDING":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot reject request with status '{request.status}'. Must be 'IN_REVIEW'. Please view the request details first to update status."
+                detail=f"Cannot reject request with status '{request.status}'. Must be 'pending'."
             )
 
         # Get all items in the request for rejection
@@ -362,10 +335,10 @@ async def reject_approval_request_item(
                 detail="Approval request not found or access denied"
             )
 
-        if request.status != "IN_REVIEW":
+        if request.status != "PENDING":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot reject item in request with status '{request.status}'. Must be 'IN_REVIEW'."
+                detail=f"Cannot reject item in request with status '{request.status}'. Must be 'pending'."
             )
 
         # Verify the item exists and belongs to this request
@@ -441,8 +414,8 @@ async def reject_approval_request_item(
                     )
                 )
         else:
-            # Still has pending items, keep in review
-            new_status = "IN_REVIEW"
+            # Still has pending items, keep as pending
+            new_status = "pending"
 
         await db.commit()
 
