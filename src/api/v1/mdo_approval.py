@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select, update, text
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.database import get_db_session
@@ -149,7 +149,7 @@ async def approve_request(
                 detail="Approval request not found or access denied"
             )
 
-        if request.status != "PENDING":
+        if request.status != ApprovalStatus.PENDING:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Cannot approve request with status '{request.status}'. Must be 'pending'."
@@ -174,7 +174,7 @@ async def approve_request(
                 update(ApprovalRequestItemRead)
                 .where(ApprovalRequestItemRead.id == item.id)
                 .values(
-                    status=text("'APPROVED'::approval_status_enum")
+                    status=ApprovalStatus.APPROVED
                 )
             )
             db.add(MdoApproval(
@@ -193,7 +193,7 @@ async def approve_request(
         await db.execute(
             update(ApprovalRequestRead)
             .where(ApprovalRequestRead.id == body.request_id)
-            .values(status=text("'APPROVED'::approval_status_enum"), updated_at=datetime.now(timezone.utc))
+            .values(status=ApprovalStatus.APPROVED, updated_at=datetime.now(timezone.utc))
         )
         await db.commit()
 
@@ -242,7 +242,7 @@ async def reject_request(
                 detail="Approval request not found or access denied"
             )
 
-        if request.status != "PENDING":
+        if request.status != ApprovalStatus.PENDING:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Cannot reject request with status '{request.status}'. Must be 'pending'."
@@ -267,7 +267,7 @@ async def reject_request(
                 update(ApprovalRequestItemRead)
                 .where(ApprovalRequestItemRead.id == item.id)
                 .values(
-                    status=text("'REJECTED'::approval_status_enum"),
+                    status=ApprovalStatus.REJECTED,
                     reviewer_comments=body.rejection_comment,
                     rejected_at=datetime.now(timezone.utc)
                 )
@@ -280,7 +280,7 @@ async def reject_request(
             update(ApprovalRequestRead)
             .where(ApprovalRequestRead.id == body.request_id)
             .values(
-                status=text("'REJECTED'::approval_status_enum"),
+                status=ApprovalStatus.REJECTED,
                 reviewer_comments=body.rejection_comment,
                 rejected_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc)
@@ -335,7 +335,7 @@ async def reject_approval_request_item(
                 detail="Approval request not found or access denied"
             )
 
-        if request.status != "PENDING":
+        if request.status != ApprovalStatus.PENDING:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Cannot reject item in request with status '{request.status}'. Must be 'pending'."
@@ -355,7 +355,7 @@ async def reject_approval_request_item(
                 detail="Approval request item not found"
             )
 
-        if item.status == "REJECTED":
+        if item.status == ApprovalStatus.REJECTED:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Item is already rejected"
@@ -366,7 +366,7 @@ async def reject_approval_request_item(
             update(ApprovalRequestItemRead)
             .where(ApprovalRequestItemRead.id == body.item_id)
             .values(
-                status=text("'REJECTED'::approval_status_enum"),
+                status=ApprovalStatus.REJECTED,
                 reviewer_comments=body.rejection_comment,
                 rejected_at=datetime.now(timezone.utc)
             )
@@ -381,41 +381,41 @@ async def reject_approval_request_item(
         all_items = all_items_result.scalars().all()
         
         # Count statuses
-        pending_count = sum(1 for item in all_items if item.status == "PENDING")
-        approved_count = sum(1 for item in all_items if item.status == "APPROVED")
-        rejected_count = sum(1 for item in all_items if item.status == "REJECTED")
+        pending_count = sum(1 for item in all_items if item.status == ApprovalStatus.PENDING)
+        approved_count = sum(1 for item in all_items if item.status == ApprovalStatus.APPROVED)
+        rejected_count = sum(1 for item in all_items if item.status == ApprovalStatus.REJECTED)
 
         # Update request status based on item statuses
         if pending_count == 0:  # No pending items left
             if approved_count > 0 and rejected_count > 0:
                 # Mixed results - keep as approved if any items were approved
-                new_status = "approved"
+                new_status = ApprovalStatus.APPROVED
             elif rejected_count > 0 and approved_count == 0:
                 # All items rejected
-                new_status = "rejected"
+                new_status = ApprovalStatus.REJECTED
                 await db.execute(
                     update(ApprovalRequestRead)
                     .where(ApprovalRequestRead.id == body.request_id)
                     .values(
-                        status=text("'REJECTED'::approval_status_enum"),
+                        status=ApprovalStatus.REJECTED,
                         rejected_at=datetime.now(timezone.utc),
                         updated_at=datetime.now(timezone.utc)
                     )
                 )
             else:
                 # All approved
-                new_status = "approved"
+                new_status = ApprovalStatus.APPROVED
                 await db.execute(
                     update(ApprovalRequestRead)
                     .where(ApprovalRequestRead.id == body.request_id)
                     .values(
-                        status=text("'APPROVED'::approval_status_enum"),
+                        status=ApprovalStatus.APPROVED,
                         updated_at=datetime.now(timezone.utc)
                     )
                 )
         else:
             # Still has pending items, keep as pending
-            new_status = "pending"
+            new_status = ApprovalStatus.PENDING
 
         await db.commit()
 
