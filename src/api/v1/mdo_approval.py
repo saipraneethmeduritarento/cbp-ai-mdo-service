@@ -14,7 +14,7 @@ from ...core.database import get_db_session
 from ...core.logger import logger
 from ...crud.mdo_approval_request import crud_mdo_approval_request
 from ...models.mdo_approval import ApprovalRequestRead, ApprovalRequestItemRead, MdoApproval
-from ...schemas.comman import ApprovalStatus
+from ...schemas.comman import ApprovalStatus, ApprovalItemStatus
 from ...schemas.mdo_approval import (
     ApprovalRequestListItem,
     ApprovalRequestDetail,
@@ -46,13 +46,16 @@ async def get_approval_requests(
     Supports search and filtering by status and date range.
     """
     try:
+        # Convert status_filter to uppercase to match database enum
+        normalized_status = status_filter.upper() if status_filter else None
+        
         items, total_count = await crud_mdo_approval_request.list_mdo_requests(
             db=db,
             mdo_id=mdo_id,
             page=page,
             page_size=page_size,
             search=search,
-            status_filter=status_filter,
+            status_filter=normalized_status,
             from_date=from_date,
             to_date=to_date
         )
@@ -174,7 +177,7 @@ async def approve_request(
                 update(ApprovalRequestItemRead)
                 .where(ApprovalRequestItemRead.id == item.id)
                 .values(
-                    status=ApprovalStatus.APPROVED
+                    status=ApprovalItemStatus.APPROVED
                 )
             )
             db.add(MdoApproval(
@@ -267,7 +270,7 @@ async def reject_request(
                 update(ApprovalRequestItemRead)
                 .where(ApprovalRequestItemRead.id == item.id)
                 .values(
-                    status=ApprovalStatus.REJECTED,
+                    status=ApprovalItemStatus.REJECTED,
                     reviewer_comments=body.rejection_comment,
                     rejected_at=datetime.now(timezone.utc)
                 )
@@ -366,7 +369,7 @@ async def reject_approval_request_item(
             update(ApprovalRequestItemRead)
             .where(ApprovalRequestItemRead.id == body.item_id)
             .values(
-                status=ApprovalStatus.REJECTED,
+                status=ApprovalItemStatus.REJECTED,
                 reviewer_comments=body.rejection_comment,
                 rejected_at=datetime.now(timezone.utc)
             )

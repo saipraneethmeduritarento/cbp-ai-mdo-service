@@ -8,7 +8,7 @@ from sqlalchemy import Column, String, DateTime, Enum, ForeignKey, Integer, Text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from ..core.database import Base
-from ..schemas.comman import ApprovalStatus
+from ..schemas.comman import ApprovalStatus, ApprovalItemStatus
 
 
 class ApprovalRequestRead(Base):
@@ -130,9 +130,9 @@ class ApprovalRequestItemRead(Base):
 
     # Item status
     status = Column(
-        Enum(ApprovalStatus, name="approval_request_item_status_enum", create_type=True),
+        Enum(ApprovalItemStatus, name="approval_request_item_status_enum", create_type=True),
         nullable=False,
-        default=ApprovalStatus.PENDING
+        default=ApprovalItemStatus.PENDING
     )
 
     created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
@@ -178,32 +178,12 @@ class MdoApproval(Base):
     plan_name = Column(String(200), nullable=False, index=True)
     due_date = Column(DateTime(timezone=True), nullable=False, index=True)
 
-    # User who submitted the request
+    # User who submitted the request (reference only, no FK constraint)
     user_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("users.user_id", ondelete="CASCADE"),
         nullable=False,
         index=True
     )
-
-    # Status
-    status = Column(
-        Enum(ApprovalStatus, name="mdo_approval_status_enum", create_type=True),
-        nullable=False,
-        default=ApprovalStatus.PENDING
-    )
-
-    # Timestamps
-    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc)
-    )
-
-    # Reviewer comments
-    reviewer_comments = Column(Text, nullable=True)
 
     # Publish ID for tracking published approvals
     publish_id = Column(UUID(as_uuid=True), nullable=True, index=True)
