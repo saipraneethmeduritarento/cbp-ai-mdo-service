@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     APP_VERSION: str = "1.0.0"
     APP_ROOT_PATH: str = "/mdo-tpc-ai"
 
+    REQUIRED_ROLE: str = "PUBLIC" # set "cbp_creator" for production
+
     DATABASE_URL: str
 
 # Create a settings instance that can be imported by other modules

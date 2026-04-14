@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...core.auth import require_cbp_creator
 from ...core.database import get_db_session
 from ...core.logger import logger
 from ...crud.mdo_approval_request import crud_mdo_approval_request
@@ -27,7 +28,11 @@ from ...schemas.mdo_approval import (
     ApprovalRequestFilters
 )
 
-router = APIRouter(prefix="/mdo", tags=["MDO Approval"])
+router = APIRouter(
+    prefix="/mdo",
+    tags=["MDO Approval"],
+    dependencies=[Depends(require_cbp_creator)]
+)
 
 
 @router.get("/approval-requests/list", response_model=PaginatedApprovalRequestsResponse)
@@ -187,7 +192,8 @@ async def approve_and_publish_request(
                 designation_name=item.designation_name,
                 plan_name=body.plan_name,
                 due_date=body.due_date,
-                user_id=request.user_id
+                user_id=request.user_id,
+                isApar=body.isApar                
             ))
 
         await asyncio.gather(*[approve_item(item) for item in items_to_approve])

@@ -13,6 +13,7 @@ class ApproveRequestBody(BaseModel):
     request_id: UUID = Field(..., description="ID of the approval request")
     plan_name: str = Field(..., description="Name of the CBP plan")
     due_date: datetime = Field(..., description="Due date for plan completion")
+    isApar: bool = Field(False, description="Whether this is an APAR plan")    
 
 
 class RejectRequestBody(BaseModel):
