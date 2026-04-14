@@ -4,7 +4,7 @@ This service has READ access to approval_requests/items and FULL WRITE access to
 """
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Boolean, Column, String, DateTime, Enum, ForeignKey, Integer, Text
+from sqlalchemy import Column, String, DateTime, Enum, ForeignKey, Integer, Text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from ..core.database import Base
@@ -187,6 +187,3 @@ class MdoApproval(Base):
 
     # Publish ID for tracking published approvals
     publish_id = Column(UUID(as_uuid=True), nullable=True, index=True)
-
-    # APAR flag
-    isApar = Column(Boolean, nullable=False, default=False)

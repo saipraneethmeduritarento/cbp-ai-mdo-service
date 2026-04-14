@@ -29,10 +29,11 @@ def _get_public_key(kid: str) -> dict:
 
 def require_cbp_creator(
     credentials: HTTPAuthorizationCredentials = Depends(_bearer_scheme),
-) -> str:
+) -> tuple[str, str]:
     """
     FastAPI dependency that validates an iGOT JWT and enforces the cbp_creator role.
-    Returns the authenticated user_id on success.
+    Returns (user_id, raw_token) on success so callers can forward the token to
+    downstream APIs (e.g. CBP plan create).
     Raises HTTP 401 for invalid/expired tokens and HTTP 403 for missing role.
     """
     token = credentials.credentials
@@ -89,6 +90,7 @@ def require_cbp_creator(
             detail=f"Access denied: '{settings.REQUIRED_ROLE}' role required.",
         )
 
-    # Extract and return the actual user ID from the sub claim
+    # Extract the actual user ID from the sub claim and return with token
     raw_sub = decoded.get("sub", "")
-    return raw_sub.split(":")[-1]
+    user_id = raw_sub.split(":")[-1]
+    return user_id, token

@@ -24,6 +24,8 @@ class Settings(BaseSettings):
 
     REQUIRED_ROLE: str = "PUBLIC" # set "cbp_creator" for production
 
+    CBP_API_KEY: bool = False  # set True in .env to skip the real CBP API call
+
     DATABASE_URL: str
 
 # Create a settings instance that can be imported by other modules

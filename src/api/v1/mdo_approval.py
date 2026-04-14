@@ -137,93 +137,53 @@ async def get_approval_request_detail(
 async def approve_and_publish_request(
     body: ApproveRequestBody,
     mdo_id: str = Query(..., description="MDO ID of the logged-in MDO admin"),
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_db_session),
+    auth: tuple = Depends(require_cbp_creator),
 ):
     """
-    Approve all or specific items in an approval and publish request.
-    Creates mdo_approval records and updates item statuses.
+    Approve all items in an approval request, create a CBP plan via the
+    external API, and persist the returned publish_id against each MdoApproval row.
     """
+    _user_id, token = auth
     try:
-        request_stmt = select(ApprovalRequestRead).where(
-            ApprovalRequestRead.id == body.request_id,
-            ApprovalRequestRead.mdo_id == mdo_id
+        updated_request, publish_id_str = await crud_mdo_approval_request.approve_and_publish_request(
+            db=db,
+            request_id=body.request_id,
+            mdo_id=mdo_id,
+            plan_name=body.plan_name,
+            due_date=body.due_date.date(),
+            token=token,
         )
-        request_result = await db.execute(request_stmt)
-        request = request_result.scalar_one_or_none()
 
-        if not request:
+        if updated_request is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Approval request not found or access denied"
+                detail="Approval request not found, access denied, or not in PENDING status.",
             )
 
-        if request.status != ApprovalStatus.PENDING:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot approve request with status '{request.status}'. Must be 'pending'."
-            )
+        items_processed = len(updated_request.items) if updated_request.items else 0
+        item_ids = [item.id for item in updated_request.items] if updated_request.items else []
 
-        # Get all items in the request for approval
-        items_stmt = select(ApprovalRequestItemRead).where(
-            ApprovalRequestItemRead.approval_request_id == body.request_id
+        logger.info(
+            f"Approved {items_processed} item(s) for request {body.request_id} | "
+            f"publish_id={publish_id_str}"
         )
-
-        items_result = await db.execute(items_stmt)
-        items_to_approve = items_result.scalars().all()
-
-        if not items_to_approve:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No items found to approve"
-            )
-
-        async def approve_item(item: ApprovalRequestItemRead):
-            await db.execute(
-                update(ApprovalRequestItemRead)
-                .where(ApprovalRequestItemRead.id == item.id)
-                .values(
-                    status=ApprovalItemStatus.APPROVED
-                )
-            )
-            db.add(MdoApproval(
-                approval_request_id=body.request_id,
-                approval_request_item_id=item.id,
-                mdo_id=mdo_id,
-                designation_name=item.designation_name,
-                plan_name=body.plan_name,
-                due_date=body.due_date,
-                user_id=request.user_id,
-                isApar=body.isApar                
-            ))
-
-        await asyncio.gather(*[approve_item(item) for item in items_to_approve])
-
-        # Since we're approving all items in the request, set status to approved
-        await db.execute(
-            update(ApprovalRequestRead)
-            .where(ApprovalRequestRead.id == body.request_id)
-            .values(status=ApprovalStatus.APPROVED, updated_at=datetime.now(timezone.utc))
-        )
-        await db.commit()
-
-        logger.info(f"Approved {len(items_to_approve)} items for request {body.request_id}")
 
         return ApprovalActionResponse(
-            message=f"Successfully approved {len(items_to_approve)} designation(s)",
+            message="CBP plan created successfully",
             request_status="approved",
-            items_processed=len(items_to_approve),
-            item_ids=[item.id for item in items_to_approve]
+            items_processed=items_processed,
+            item_ids=item_ids,
+            publish_id=publish_id_str,
         )
 
     except HTTPException:
-        await db.rollback()
         raise
-    except Exception as e:
-        await db.rollback()
-        logger.exception(f"Error approving request")
+    except Exception:
+        logger.exception("Error in approve_and_publish_request")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to approve request"
+            detail="Failed to approve and publish request.",
         )
 
 

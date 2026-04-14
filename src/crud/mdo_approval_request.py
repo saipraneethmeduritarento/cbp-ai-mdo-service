@@ -4,6 +4,7 @@ CRUD operations for MDO Portal approval request management
 import uuid
 from datetime import datetime, date, timezone
 from typing import List, Optional, Tuple
+
 from sqlalchemy import and_, desc, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -11,6 +12,8 @@ from sqlalchemy.orm import selectinload, noload
 
 from ..models.mdo_approval import ApprovalRequestRead, ApprovalRequestItemRead, MdoApproval
 from ..schemas.comman import ApprovalStatus, ApprovalItemStatus
+from ..core.logger import logger
+from ..services.cbp_service import call_cbp_create, extract_content_ids
 
 
 class CRUDMDOApprovalRequest:
@@ -105,91 +108,116 @@ class CRUDMDOApprovalRequest:
         mdo_id: str,
         plan_name: str,
         due_date: date,
-        mdo_name: Optional[str] = None
-    ) -> Optional[ApprovalRequestRead]:
+        token: str,
+        mdo_name: Optional[str] = None,
+    ) -> tuple["ApprovalRequestRead", str]:
         """
-        Approve and publish a pending approval request with plan details.
-        
-        This method:
-        1. Validates the request exists and is pending
-        2. Updates the request status to approved
-        3. Creates MdoApproval records for each item
-        4. Returns the updated request
-        
-        Args:
-            db: Database session
-            request_id: UUID of the approval request
-            mdo_id: MDO identifier
-            plan_name: Name of the CBP plan
-            due_date: Due date for plan completion
-            mdo_name: Optional MDO name for tracking
-            
+        Approve and publish a pending approval request.
+
+        Order of operations (fail-safe):
+          1. Lock + validate the request is PENDING
+          2. Call CBP create API to get publish_id  ← fails fast, no DB writes yet
+          3. Update approval_requests status → APPROVED
+          4. Create MdoApproval rows (with publish_id + isApar) for each item
+          5. Update approval_request_items status → APPROVED
+          6. Commit
+
         Returns:
-            Updated ApprovalRequestRead object or None if not found/invalid
+            (updated ApprovalRequestRead, publish_id string)
+            or (None, "") if not found / not PENDING
         """
-        # Lock the row to prevent concurrent modifications
+        # 1. Lock the row to prevent concurrent modifications
         stmt = (
             select(ApprovalRequestRead)
             .options(selectinload(ApprovalRequestRead.items))
             .where(
                 and_(
                     ApprovalRequestRead.id == request_id,
-                    ApprovalRequestRead.mdo_id == mdo_id
+                    ApprovalRequestRead.mdo_id == mdo_id,
                 )
             )
             .with_for_update()
         )
         result = await db.execute(stmt)
         request = result.scalars().first()
-        
-        if not request or request.status != ApprovalStatus.PENDING:
-            return None
 
-        # Update the approval request
-        stmt = (
+        if not request or request.status != ApprovalStatus.PENDING:
+            return None, ""
+
+        # 2. Collect inputs for CBP API from each item
+        designations = [
+            item.igot_designation_name or item.designation_name
+            for item in request.items
+        ]
+        content_ids: List[str] = []
+        for item in request.items:
+            if item.cbp_plan_data:
+                content_ids.extend(extract_content_ids(item.cbp_plan_data))
+        # Deduplicate while preserving order
+        seen: set = set()
+        content_ids = [c for c in content_ids if not (c in seen or seen.add(c))]
+
+        if not content_ids:
+            logger.warning(
+                f"No content IDs found for request {request_id}. "
+                "cbp_plan_data may be empty or missing selected_courses."
+            )
+
+        # Call CBP API BEFORE any DB writes; raises HTTPException(502) on failure
+        publish_id_str = await call_cbp_create(
+            token=token,
+            org_id=request.state_center_id,
+            plan_name=plan_name,
+            due_date=due_date,
+            designations=designations,
+            content_ids=content_ids,
+            is_apar=False,
+        )
+        publish_id = uuid.UUID(publish_id_str)
+
+        # 3. Update the approval request status
+        await db.execute(
             update(ApprovalRequestRead)
             .where(
                 and_(
                     ApprovalRequestRead.id == request_id,
                     ApprovalRequestRead.mdo_id == mdo_id,
-                    ApprovalRequestRead.status == ApprovalStatus.PENDING
+                    ApprovalRequestRead.status == ApprovalStatus.PENDING,
                 )
             )
             .values(
                 status=ApprovalStatus.APPROVED,
-                reviewed_at=datetime.now(timezone.utc)
+                updated_at=datetime.now(timezone.utc),
             )
         )
-        await db.execute(stmt)
 
-        # Create MdoApproval records for each item
+        # 4 & 5. Create MdoApproval rows and update item statuses
+        due_dt = datetime.combine(due_date, datetime.min.time()).replace(tzinfo=timezone.utc)
+
         for item in request.items:
-            mdo_approval = MdoApproval(
-                approval_request_id=request_id,
-                approval_request_item_id=item.id,
-                mdo_id=mdo_id,
-                designation_name=item.designation_name,
-                plan_name=plan_name,
-                due_date=datetime.combine(due_date, datetime.min.time()).replace(tzinfo=timezone.utc),
-                user_id=request.user_id,
-                approved_at=datetime.now(timezone.utc)
-            )
-            db.add(mdo_approval)
-
-            # Update the item status
-            item_update_stmt = (
-                update(ApprovalRequestItemRead)
-                .where(ApprovalRequestItemRead.id == item.id)
-                .values(
-                    status=ApprovalItemStatus.APPROVED,
+            db.add(
+                MdoApproval(
+                    approval_request_id=request_id,
+                    approval_request_item_id=item.id,
+                    mdo_id=mdo_id,
+                    designation_name=item.designation_name,
+                    plan_name=plan_name,
+                    due_date=due_dt,
+                    user_id=request.user_id,
+                    publish_id=publish_id,
                 )
             )
-            await db.execute(item_update_stmt)
+            await db.execute(
+                update(ApprovalRequestItemRead)
+                .where(ApprovalRequestItemRead.id == item.id)
+                .values(status=ApprovalItemStatus.APPROVED)
+            )
 
+        # 6. Single commit for all DB changes
         await db.commit()
 
-        # Return the updated request
-        return await self.get_by_request_id_and_mdo(db, request_id, mdo_id)
+        updated = await self.get_by_request_id_and_mdo(db, request_id, mdo_id)
+        return updated, publish_id_str
 
     async def reject_request(
         self,
