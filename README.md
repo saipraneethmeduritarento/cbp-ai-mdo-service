@@ -25,8 +25,9 @@ src/
 ├── schemas/
 │   ├── comman.py                # Common schemas and enums
 │   └── mdo_approval.py          # Pydantic schemas for API requests/responses
-├── services/                    # Business logic services (empty)
-└── utils/                       # Utility functions (empty)
+├── services/
+│   └── cbp_service.py           # External CBP plan create API integration
+└── utils/                       # Utility functions
 pyproject.toml                   # Python project configuration
 Dockerfile                       # Container configuration
 .env                            # Environment variables
@@ -36,8 +37,9 @@ Dockerfile                       # Container configuration
 
 - **Approval Request Management**: View and manage pending approval requests from various departments
 - **Designation Review**: Detailed view of designations with role responsibilities, activities, and competencies
+- **CBP Plan Creation**: On approval, automatically calls the external CBP plan create API and stores the returned `publish_id`
 - **Bulk Approval Actions**: Approve or reject multiple designations in a single request
-- **Status Tracking**: Automatic status updates (pending → in_review → approved/rejected)
+- **Status Tracking**: Automatic status updates (`PENDING` → `APPROVED` / `REJECTED`)
 - **Search and Filtering**: Filter requests by status, date range, and search by name
 - **Audit Trail**: Complete tracking of approval actions with timestamps and comments
 - **Pagination Support**: Efficient handling of large datasets with paginated responses
@@ -94,6 +96,12 @@ DATABASE_URL="postgresql+asyncpg://user:password@localhost:5432/dbname"
 
 # JWT Authentication
 SECRET_KEY="your-secret-key-here"
+
+# Role required to access MDO endpoints (default: PUBLIC; set to cbp_creator in production)
+REQUIRED_ROLE="cbp_creator"
+
+# CBP API Mock (set True to skip real CBP plan create call and return a dummy publish_id)
+CBP_API_KEY=False
 ```
 
 ### Run Application
@@ -153,8 +161,8 @@ All endpoints are under `/api/v1/mdo` and require MDO authentication.
 | Method | Endpoint | Description |
 |---|---|---|
 | GET | `/approval-requests/list` | Get paginated list of approval requests with search and filtering |
-| GET | `/approval-requests/{request_id}` | Get detailed view of specific approval request (auto-updates to IN_REVIEW) |
-| POST | `/approval-requests/approve` | Approve all designations in a request |
+| GET | `/approval-requests/{request_id}` | Get detailed view of specific approval request |
+| POST | `/approval-requests/approve_and_publish` | Approve all designations, create CBP plan, and store `publish_id` |
 | POST | `/approval-requests/reject` | Reject all designations in a request |
 | POST | `/approval-requests/items/reject` | Reject specific designation with comments |
 
@@ -165,7 +173,7 @@ All endpoints are under `/api/v1/mdo` and require MDO authentication.
 - `page`: Page number (default: 1)
 - `page_size`: Items per page (default: 10, max: 100)
 - `search`: Search by request name or state/center name
-- `status_filter`: Filter by status (pending, IN_REVIEW, approved, rejected)
+- `status_filter`: Filter by status (`DRAFT`, `PENDING`, `APPROVED`, `REJECTED`)
 - `from_date`: Filter from date (YYYY-MM-DD)
 - `to_date`: Filter to date (YYYY-MM-DD)
 
@@ -209,12 +217,17 @@ Stores approval request metadata with organization context and status tracking.
 | id | UUID | Primary key |
 | request_name | String(100) | Name of the approval request |
 | user_id | UUID | User who submitted the request |
-| org_type | String(20) | Organization type (state/center/department) |
+| org_type | String(20) | Organization type (ministry or state) |
 | state_center_id | String(255) | State or center identifier |
+| state_center_name | String(255) | Display name of the state or center |
 | department_id | String(255) | Department identifier (optional) |
+| department_name | String(255) | Display name of the department (optional) |
 | mdo_id | String(255) | MDO responsible for approval |
 | designation_count | Integer | Number of designations in request |
-| status | String(20) | Request status (pending/IN_REVIEW/approved/rejected) |
+| status | Enum | Request status (`DRAFT` / `PENDING` / `APPROVED` / `REJECTED`) |
+| reviewer_comments | Text | Comments left by the MDO reviewer (optional) |
+| rejected_at | DateTime | Timestamp when request was rejected (optional) |
+| revoked_at | DateTime | Timestamp when request was revoked (optional) |
 | created_at | DateTime | Creation timestamp |
 | updated_at | DateTime | Last update timestamp |
 
@@ -225,14 +238,23 @@ Stores individual designation details within each approval request.
 |---|---|---|
 | id | UUID | Primary key |
 | approval_request_id | UUID | Foreign key to approval_requests |
+| source_role_mapping_id | UUID | Reference to the originating role mapping |
 | designation_name | String(255) | Name of the designation |
+| wing_division_section | String(255) | Wing, division, or section (optional) |
 | role_responsibilities | JSONB | Role responsibilities data |
 | activities | JSONB | Activities data |
 | competencies | JSONB | Competencies data |
-| status | String(20) | Item status (pending/approved/rejected) |
+| sort_order | Integer | Hierarchical sort order (optional) |
+| igot_designation_name | String(255) | Designation name as it exists in the iGOT portal (optional) |
+| igot_designation_id | String(255) | Designation ID from the iGOT portal (optional) |
+| cbp_plan_data | JSONB | CBP plan snapshot containing `selected_courses` with content identifiers |
+| status | Enum | Item status (`PENDING` / `APPROVED` / `REJECTED`) |
+| reviewer_comments | Text | Reviewer feedback for this item (optional) |
+| rejected_at | DateTime | Timestamp when item was rejected (optional) |
+| created_at | DateTime | Creation timestamp |
 
 ### mdo_approval
-Tracks MDO approval actions for audit purposes.
+Tracks MDO approval actions for audit purposes. This service has full write ownership of this table.
 
 | Column | Type | Description |
 |---|---|---|
@@ -244,6 +266,7 @@ Tracks MDO approval actions for audit purposes.
 | plan_name | String(200) | Associated training plan name |
 | due_date | DateTime | Plan due date |
 | user_id | UUID | Original request submitter |
+| publish_id | UUID | CBP plan ID returned by the external CBP create API (optional) |
 
 ## Response Examples
 
@@ -280,10 +303,11 @@ Tracks MDO approval actions for audit purposes.
 ### Approval Action Response
 ```json
 {
-  "message": "Successfully approved 15 designation(s)",
+  "message": "CBP plan created successfully",
   "request_status": "approved",
   "items_processed": 15,
-  "item_ids": ["uuid1", "uuid2", ...]
+  "item_ids": ["uuid1", "uuid2", ...],
+  "publish_id": "cbp-plan-uuid"
 }
 ```
 
