@@ -128,14 +128,14 @@ async def get_approval_request_detail(
         )
 
 
-@router.post("/approval-requests/approve", response_model=ApprovalActionResponse)
-async def approve_request(
+@router.post("/approval-requests/approve_and_publish", response_model=ApprovalActionResponse)
+async def approve_and_publish_request(
     body: ApproveRequestBody,
     mdo_id: str = Query(..., description="MDO ID of the logged-in MDO admin"),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
-    Approve all or specific items in an approval request.
+    Approve all or specific items in an approval and publish request.
     Creates mdo_approval records and updates item statuses.
     """
     try:
