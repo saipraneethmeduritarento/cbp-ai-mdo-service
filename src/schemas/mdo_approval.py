@@ -102,7 +102,6 @@ class ApprovalRequestDetail(BaseModel):
     state_center_id: str
     department_id: Optional[str] = None
     user_id: UUID
-    reviewed_at: Optional[datetime] = None
     rejected_at: Optional[datetime] = None
     reviewer_comments: Optional[str] = None
     items: List[ApprovalRequestItemSchema] = []
@@ -134,9 +133,17 @@ class PaginatedApprovalRequestsResponse(BaseModel):
 
 
 class ApprovalActionResponse(BaseModel):
-    """Response after approve/reject action"""
+    """Response after approve action"""
     message: str
     request_status: str
     items_processed: int
     item_ids: List[UUID]
-    publish_id: Optional[str] = None
+    publish_id: str
+
+
+class RejectActionResponse(BaseModel):
+    """Response after reject action"""
+    message: str
+    request_status: str
+    items_processed: int
+    item_ids: List[UUID]

@@ -2,20 +2,15 @@
 MDO Approval API endpoints.
 Allows MDO admins to view, approve, and reject approval requests.
 """
-import asyncio
-from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Optional
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.auth import require_cbp_creator
 from ...core.database import get_db_session
 from ...core.logger import logger
-from ...crud.mdo_approval_request import crud_mdo_approval_request
-from ...models.mdo_approval import ApprovalRequestRead, ApprovalRequestItemRead, MdoApproval
-from ...schemas.comman import ApprovalStatus, ApprovalItemStatus
+from ...controller.mdo_approval import mdo_approval_controller
 from ...schemas.mdo_approval import (
     ApprovalRequestListItem,
     ApprovalRequestDetail,
@@ -23,6 +18,7 @@ from ...schemas.mdo_approval import (
     RejectRequestBody,
     RejectItemBody,
     ApprovalActionResponse,
+    RejectActionResponse,
     PaginatedApprovalRequestsResponse,
     PaginationMetadata,
     ApprovalRequestFilters
@@ -51,25 +47,19 @@ async def get_approval_requests(
     Supports search and filtering by status and date range.
     """
     try:
-        # Convert status_filter to uppercase to match database enum
-        normalized_status = status_filter.upper() if status_filter else None
-        
-        items, total_count = await crud_mdo_approval_request.list_mdo_requests(
+        items, total_count = await mdo_approval_controller.list_requests(
             db=db,
             mdo_id=mdo_id,
             page=page,
             page_size=page_size,
             search=search,
-            status_filter=normalized_status,
+            status_filter=status_filter,
             from_date=from_date,
             to_date=to_date
         )
-        
-        # Calculate pagination metadata
+
         total_pages = (total_count + page_size - 1) // page_size
-        has_next = page < total_pages
-        has_prev = page > 1
-        
+
         return PaginatedApprovalRequestsResponse(
             items=[ApprovalRequestListItem.model_validate(item) for item in items],
             pagination=PaginationMetadata(
@@ -77,8 +67,8 @@ async def get_approval_requests(
                 page_size=page_size,
                 total_items=total_count,
                 total_pages=total_pages,
-                has_next=has_next,
-                has_prev=has_prev
+                has_next=page < total_pages,
+                has_prev=page > 1
             ),
             filters=ApprovalRequestFilters(
                 search=search,
@@ -87,13 +77,12 @@ async def get_approval_requests(
                 to_date=to_date
             )
         )
-    except Exception as e:
+    except Exception:
         logger.exception(f"Error fetching approval requests for MDO {mdo_id}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch approval requests"
         )
-
 
 
 @router.get("/approval-requests/{request_id}", response_model=ApprovalRequestDetail)
@@ -106,12 +95,9 @@ async def get_approval_request_detail(
     Get detailed view of a specific approval request with all items.
     """
     try:
-        stmt = select(ApprovalRequestRead).where(
-            ApprovalRequestRead.id == request_id,
-            ApprovalRequestRead.mdo_id == mdo_id
+        request = await mdo_approval_controller.get_request_detail(
+            db=db, request_id=request_id, mdo_id=mdo_id
         )
-        result = await db.execute(stmt)
-        request = result.scalar_one_or_none()
 
         if not request:
             raise HTTPException(
@@ -119,14 +105,12 @@ async def get_approval_request_detail(
                 detail="Approval request not found or access denied"
             )
 
-        logger.info(f"Current request status: '{request.status}' for request {request_id}")
-
         return ApprovalRequestDetail.model_validate(request)
 
     except HTTPException:
         raise
-    except Exception as e:
-        logger.exception(f"Error fetching approval request detail")
+    except Exception:
+        logger.exception("Error fetching approval request detail")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch approval request details"
@@ -146,7 +130,7 @@ async def approve_and_publish_request(
     """
     _user_id, token = auth
     try:
-        updated_request, publish_id_str = await crud_mdo_approval_request.approve_and_publish_request(
+        updated_request, publish_id_str = await mdo_approval_controller.approve_and_publish(
             db=db,
             request_id=body.request_id,
             mdo_id=mdo_id,
@@ -187,95 +171,47 @@ async def approve_and_publish_request(
         )
 
 
-@router.post("/approval-requests/reject", response_model=ApprovalActionResponse)
+@router.post("/approval-requests/reject", response_model=RejectActionResponse)
 async def reject_request(
     body: RejectRequestBody,
     mdo_id: str = Query(..., description="MDO ID of the logged-in MDO admin"),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
-    Reject all or specific items in an approval request.
-    Creates mdo_approval records with rejection comments and updates item statuses.
+    Reject all items in an approval request.
     """
     try:
-        request_stmt = select(ApprovalRequestRead).where(
-            ApprovalRequestRead.id == body.request_id,
-            ApprovalRequestRead.mdo_id == mdo_id
+        updated_request, items_count = await mdo_approval_controller.reject_request(
+            db=db,
+            request_id=body.request_id,
+            mdo_id=mdo_id,
+            comments=body.rejection_comment,
         )
-        request_result = await db.execute(request_stmt)
-        request = request_result.scalar_one_or_none()
 
-        if not request:
+        if updated_request is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Approval request not found or access denied"
+                detail="Approval request not found, access denied, or not in PENDING status."
             )
 
-        if request.status != ApprovalStatus.PENDING:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot reject request with status '{request.status}'. Must be 'pending'."
-            )
+        item_ids = [item.id for item in updated_request.items] if updated_request.items else []
 
-        # Get all items in the request for rejection
-        items_stmt = select(ApprovalRequestItemRead).where(
-            ApprovalRequestItemRead.approval_request_id == body.request_id
-        )
+        logger.info(f"Rejected {items_count} items for request {body.request_id}")
 
-        items_result = await db.execute(items_stmt)
-        items_to_reject = items_result.scalars().all()
-
-        if not items_to_reject:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No items found to reject"
-            )
-
-        async def reject_item(item: ApprovalRequestItemRead):
-            await db.execute(
-                update(ApprovalRequestItemRead)
-                .where(ApprovalRequestItemRead.id == item.id)
-                .values(
-                    status=ApprovalItemStatus.REJECTED,
-                    reviewer_comments=body.rejection_comment,
-                    rejected_at=datetime.now(timezone.utc)
-                )
-            )
-
-        await asyncio.gather(*[reject_item(item) for item in items_to_reject])
-
-        # Since we're rejecting all items in the request, set status to rejected
-        await db.execute(
-            update(ApprovalRequestRead)
-            .where(ApprovalRequestRead.id == body.request_id)
-            .values(
-                status=ApprovalStatus.REJECTED,
-                reviewer_comments=body.rejection_comment,
-                rejected_at=datetime.now(timezone.utc),
-                updated_at=datetime.now(timezone.utc)
-            )
-        )
-
-        await db.commit()
-
-        logger.info(f"Rejected {len(items_to_reject)} items for request {body.request_id}")
-
-        return ApprovalActionResponse(
-            message=f"Successfully rejected {len(items_to_reject)} designation(s)",
+        return RejectActionResponse(
+            message=f"Successfully rejected {items_count} designation(s)",
             request_status="rejected",
-            items_processed=len(items_to_reject),
-            item_ids=[item.id for item in items_to_reject]
+            items_processed=items_count,
+            item_ids=item_ids,
         )
 
     except HTTPException:
-        await db.rollback()
         raise
-    except Exception as e:
-        await db.rollback()
-        logger.exception(f"Error rejecting request")
+    except Exception:
+        logger.exception("Error rejecting request")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to reject request"
+            detail="Failed to reject request"
         )
 
 
@@ -287,123 +223,52 @@ async def reject_approval_request_item(
 ):
     """
     Reject a specific item in an approval request with comments.
-    This is used when an MDO wants to reject certain designations with specific feedback.
     """
     try:
-        # Verify the request exists and belongs to this MDO
-        request_stmt = select(ApprovalRequestRead).where(
-            ApprovalRequestRead.id == body.request_id,
-            ApprovalRequestRead.mdo_id == mdo_id
+        result, error = await mdo_approval_controller.reject_single_item(
+            db=db,
+            request_id=body.request_id,
+            item_id=body.item_id,
+            mdo_id=mdo_id,
+            comments=body.rejection_comment,
         )
-        request_result = await db.execute(request_stmt)
-        request = request_result.scalar_one_or_none()
 
-        if not request:
+        if error == "not_found":
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Approval request not found or access denied"
             )
-
-        if request.status != ApprovalStatus.PENDING:
+        if error and error.startswith("invalid_status:"):
+            current_status = error.split(":", 1)[1]
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot reject item in request with status '{request.status}'. Must be 'pending'."
+                detail=f"Cannot reject item in request with status '{current_status}'. Must be 'pending'."
             )
-
-        # Verify the item exists and belongs to this request
-        item_stmt = select(ApprovalRequestItemRead).where(
-            ApprovalRequestItemRead.id == body.item_id,
-            ApprovalRequestItemRead.approval_request_id == body.request_id
-        )
-        item_result = await db.execute(item_stmt)
-        item = item_result.scalar_one_or_none()
-
-        if not item:
+        if error == "item_not_found":
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Approval request item not found"
             )
-
-        if item.status == ApprovalStatus.REJECTED:
+        if error == "already_rejected":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Item is already rejected"
             )
 
-        # Reject the item with comment
-        await db.execute(
-            update(ApprovalRequestItemRead)
-            .where(ApprovalRequestItemRead.id == body.item_id)
-            .values(
-                status=ApprovalItemStatus.REJECTED,
-                reviewer_comments=body.rejection_comment,
-                rejected_at=datetime.now(timezone.utc)
-            )
-        )
-
-        # Check if we need to update the overall request status
-        all_items_result = await db.execute(
-            select(ApprovalRequestItemRead).where(
-                ApprovalRequestItemRead.approval_request_id == body.request_id
-            )
-        )
-        all_items = all_items_result.scalars().all()
-        
-        # Count statuses
-        pending_count = sum(1 for item in all_items if item.status == ApprovalStatus.PENDING)
-        approved_count = sum(1 for item in all_items if item.status == ApprovalStatus.APPROVED)
-        rejected_count = sum(1 for item in all_items if item.status == ApprovalStatus.REJECTED)
-
-        # Update request status based on item statuses
-        if pending_count == 0:  # No pending items left
-            if approved_count > 0 and rejected_count > 0:
-                # Mixed results - keep as approved if any items were approved
-                new_status = ApprovalStatus.APPROVED
-            elif rejected_count > 0 and approved_count == 0:
-                # All items rejected
-                new_status = ApprovalStatus.REJECTED
-                await db.execute(
-                    update(ApprovalRequestRead)
-                    .where(ApprovalRequestRead.id == body.request_id)
-                    .values(
-                        status=ApprovalStatus.REJECTED,
-                        rejected_at=datetime.now(timezone.utc),
-                        updated_at=datetime.now(timezone.utc)
-                    )
-                )
-            else:
-                # All approved
-                new_status = ApprovalStatus.APPROVED
-                await db.execute(
-                    update(ApprovalRequestRead)
-                    .where(ApprovalRequestRead.id == body.request_id)
-                    .values(
-                        status=ApprovalStatus.APPROVED,
-                        updated_at=datetime.now(timezone.utc)
-                    )
-                )
-        else:
-            # Still has pending items, keep as pending
-            new_status = ApprovalStatus.PENDING
-
-        await db.commit()
-
-        logger.info(f"Rejected item {body.item_id} from request {body.request_id} with comment: {body.rejection_comment}")
+        logger.info(f"Rejected item {body.item_id} from request {body.request_id}")
 
         return {
-            "message": f"Successfully rejected designation '{item.designation_name}'",
+            "message": f"Successfully rejected designation '{result['designation_name']}'",  # type: ignore[index]
             "request_id": body.request_id,
             "item_id": body.item_id,
-            "request_status": new_status,
+            "request_status": result["request_status"],  # type: ignore[index]
             "rejection_comment": body.rejection_comment
         }
 
     except HTTPException:
-        await db.rollback()
         raise
-    except Exception as e:
-        await db.rollback()
-        logger.exception(f"Error rejecting approval request item")
+    except Exception:
+        logger.exception("Error rejecting approval request item")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to reject approval request item"
