@@ -27,11 +27,10 @@ from ...schemas.mdo_approval import (
 router = APIRouter(
     prefix="/mdo",
     tags=["MDO Approval"],
-    dependencies=[Depends(require_cbp_creator)]
 )
 
 
-@router.get("/approval-requests/list", response_model=PaginatedApprovalRequestsResponse)
+@router.get("/approval-requests/list", response_model=PaginatedApprovalRequestsResponse, dependencies=[Depends(require_cbp_creator)])
 async def get_approval_requests(
     mdo_id: str = Query(..., description="MDO ID of the logged-in MDO admin"),
     page: int = Query(1, ge=1, description="Page number (starts from 1)"),
@@ -85,7 +84,7 @@ async def get_approval_requests(
         )
 
 
-@router.get("/approval-requests/{request_id}", response_model=ApprovalRequestDetail)
+@router.get("/approval-requests/{request_id}", response_model=ApprovalRequestDetail, dependencies=[Depends(require_cbp_creator)])
 async def get_approval_request_detail(
     request_id: UUID,
     mdo_id: str = Query(..., description="MDO ID of the logged-in MDO admin"),
@@ -171,7 +170,7 @@ async def approve_and_publish_request(
         )
 
 
-@router.post("/approval-requests/reject", response_model=RejectActionResponse)
+@router.post("/approval-requests/reject", response_model=RejectActionResponse, dependencies=[Depends(require_cbp_creator)])
 async def reject_request(
     body: RejectRequestBody,
     mdo_id: str = Query(..., description="MDO ID of the logged-in MDO admin"),
@@ -215,7 +214,7 @@ async def reject_request(
         )
 
 
-@router.post("/approval-requests/items/reject")
+@router.post("/approval-requests/items/reject", dependencies=[Depends(require_cbp_creator)])
 async def reject_approval_request_item(
     body: RejectItemBody,
     mdo_id: str = Query(..., description="MDO ID of the logged-in MDO admin"),

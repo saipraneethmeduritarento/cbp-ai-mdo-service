@@ -12,7 +12,6 @@ from sqlalchemy.orm import selectinload, noload
 
 from ..models.mdo_approval import ApprovalRequestRead, ApprovalRequestItemRead, MdoApproval
 from ..schemas.comman import ApprovalStatus, ApprovalItemStatus
-from ..core.logger import logger
 
 
 class CRUDMDOApprovalRequest:
@@ -100,15 +99,15 @@ class CRUDMDOApprovalRequest:
         result = await db.execute(stmt)
         return result.scalars().first()
 
-    async def get_pending_for_update(
+    async def _get_for_update(
         self,
         db: AsyncSession,
         request_id: uuid.UUID,
         mdo_id: str,
     ) -> Optional[ApprovalRequestRead]:
         """
-        Lock and fetch a PENDING approval request for update.
-        Returns None if not found or not PENDING.
+        Lock and fetch an approval request with items for update.
+        Returns None if not found. Does NOT check status.
         """
         stmt = (
             select(ApprovalRequestRead)
@@ -122,11 +121,21 @@ class CRUDMDOApprovalRequest:
             .with_for_update()
         )
         result = await db.execute(stmt)
-        request = result.scalars().first()
+        return result.scalars().first()
 
+    async def get_pending_for_update(
+        self,
+        db: AsyncSession,
+        request_id: uuid.UUID,
+        mdo_id: str,
+    ) -> Optional[ApprovalRequestRead]:
+        """
+        Lock and fetch a PENDING approval request for update.
+        Returns None if not found or not PENDING.
+        """
+        request = await self._get_for_update(db, request_id, mdo_id)
         if not request or request.status != ApprovalStatus.PENDING:
             return None
-
         return request
 
     async def persist_approval(
@@ -204,22 +213,9 @@ class CRUDMDOApprovalRequest:
             (updated request, items_rejected_count)
             or (None, 0) if not found / not PENDING
         """
-        # Lock the row to prevent concurrent modifications
-        stmt = (
-            select(ApprovalRequestRead)
-            .options(selectinload(ApprovalRequestRead.items))
-            .where(
-                and_(
-                    ApprovalRequestRead.id == request_id,
-                    ApprovalRequestRead.mdo_id == mdo_id
-                )
-            )
-            .with_for_update()
-        )
-        result = await db.execute(stmt)
-        request = result.scalars().first()
+        request = await self.get_pending_for_update(db, request_id, mdo_id)
 
-        if not request or request.status != ApprovalStatus.PENDING:
+        if not request:
             return None, 0
 
         items_count = len(request.items)
@@ -275,20 +271,8 @@ class CRUDMDOApprovalRequest:
             result_dict contains: designation_name, request_status
             error_message is set if validation fails, result_dict is None
         """
-        # Lock the request row to prevent concurrent modifications
-        stmt = (
-            select(ApprovalRequestRead)
-            .options(selectinload(ApprovalRequestRead.items))
-            .where(
-                and_(
-                    ApprovalRequestRead.id == request_id,
-                    ApprovalRequestRead.mdo_id == mdo_id
-                )
-            )
-            .with_for_update()
-        )
-        result = await db.execute(stmt)
-        request = result.scalars().first()
+        # Need separate not_found vs invalid_status errors, so can't use get_pending_for_update
+        request = await self._get_for_update(db, request_id, mdo_id)
 
         if not request:
             return None, "not_found"

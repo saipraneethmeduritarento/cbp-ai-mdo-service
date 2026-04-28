@@ -93,9 +93,6 @@ class MDOApprovalController:
         for item in request.items:
             if item.cbp_plan_data:
                 content_ids.extend(extract_content_ids(item.cbp_plan_data))
-        # Deduplicate while preserving order
-        seen: set[str] = set()
-        content_ids = [c for c in content_ids if not (c in seen or seen.add(c))]
 
         if not content_ids:
             logger.warning(

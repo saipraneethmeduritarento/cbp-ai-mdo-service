@@ -2,9 +2,15 @@
 Pydantic schemas for MDO approval endpoints.
 """
 from datetime import datetime
-from typing import Optional, List, Union, Any
+from typing import Optional, List, Union
 from uuid import UUID
 from pydantic import BaseModel, Field, ConfigDict, field_validator
+
+
+def _validate_rejection_comment(v: str) -> str:
+    if not v or not v.strip():
+        raise ValueError('Rejection comment cannot be empty')
+    return v.strip()
 
 
 # Request schemas
@@ -28,10 +34,7 @@ class RejectRequestBody(BaseModel):
     @field_validator('rejection_comment')
     @classmethod
     def validate_rejection_comment(cls, v: str) -> str:
-        if not v or not v.strip():
-            raise ValueError('Rejection comment cannot be empty')
-        
-        return v.strip()
+        return _validate_rejection_comment(v)
 
 
 class RejectItemBody(BaseModel):
@@ -48,10 +51,7 @@ class RejectItemBody(BaseModel):
     @field_validator('rejection_comment')
     @classmethod
     def validate_rejection_comment(cls, v: str) -> str:
-        if not v or not v.strip():
-            raise ValueError('Rejection comment cannot be empty')
-        
-        return v.strip()
+        return _validate_rejection_comment(v)
 
 
 # Response schemas
