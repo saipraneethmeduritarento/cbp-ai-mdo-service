@@ -168,22 +168,12 @@ class MdoApproval(Base):
         index=True
     )
 
-    # MDO details
-    mdo_id = Column(String(255), nullable=False, index=True)
-
-    # Designation details (denormalized)
-    designation_name = Column(String(255), nullable=False, index=True)
-
     # Plan details
     plan_name = Column(String(200), nullable=False, index=True)
     due_date = Column(DateTime(timezone=True), nullable=False, index=True)
 
-    # User who submitted the request (reference only, no FK constraint)
-    user_id = Column(
-        UUID(as_uuid=True),
-        nullable=False,
-        index=True
-    )
+    # iGOT CBP Plan ID for tracking published approvals
+    igot_cbp_plan_id = Column(UUID(as_uuid=True), nullable=True, index=True)
 
-    # Publish ID for tracking published approvals
-    publish_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    # Timestamp when igot_cbp_plan_id was created
+    created_at = Column(DateTime(timezone=True), nullable=True)

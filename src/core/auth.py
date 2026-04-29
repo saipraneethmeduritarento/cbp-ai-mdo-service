@@ -7,9 +7,10 @@ from jose import JWTError, jwt
 from jose.exceptions import ExpiredSignatureError
 
 from .configs import settings
+from .logger import logger
 
-CERTS_URL = "https://portal.igotkarmayogi.gov.in/auth/realms/sunbird/protocol/openid-connect/certs"
-EXPECTED_ISSUER = "https://portal.igotkarmayogi.gov.in/auth/realms/sunbird"
+CERTS_URL = f"{settings.KB_BASE_URL}/auth/realms/sunbird/protocol/openid-connect/certs"
+EXPECTED_ISSUER = f"{settings.KB_BASE_URL}/auth/realms/sunbird"
 
 
 # Registers as a Bearer security scheme → shows as the lock icon in Swagger UI
@@ -38,17 +39,23 @@ def require_cbp_creator(
     """
     token = credentials.credentials
 
+    logger.debug(f"Auth token (first 50 chars): {token[:50]}...")
+
     # Extract kid from unverified header
     try:
         unverified_header = jwt.get_unverified_header(token)
+        logger.debug(f"Token header: {unverified_header}")
     except JWTError:
+        logger.error(f"Failed to parse token header")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token: could not parse header.",
         )
 
     kid = unverified_header.get("kid")
+    print(kid)
     if not kid:
+        logger.error(f"Token header missing 'kid'. Header: {unverified_header}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token: missing kid in header.",
@@ -84,6 +91,7 @@ def require_cbp_creator(
 
     # Enforce required role
     user_roles = decoded.get("user_roles", [])
+    logger.info(f"Auth | user_roles={user_roles} | org={decoded.get('org')} | name={decoded.get('name')}")
     if settings.REQUIRED_ROLE not in user_roles:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

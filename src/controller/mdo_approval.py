@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..core.logger import logger
 from ..crud.mdo_approval_request import crud_mdo_approval_request
 from ..models.mdo_approval import ApprovalRequestRead
-from ..services.cbp_service import call_cbp_create, extract_content_ids
+from ..services.igot_service import call_igot_create, call_igot_publish, extract_content_ids
 
 
 class MDOApprovalController:
@@ -56,7 +56,7 @@ class MDOApprovalController:
             db=db, request_id=request_id, mdo_id=mdo_id
         )
 
-    async def approve_and_publish(
+    async def publish(
         self,
         db: AsyncSession,
         request_id: uuid.UUID,
@@ -75,7 +75,7 @@ class MDOApprovalController:
           4. Persist approval + audit trail            (CRUD)
 
         Returns:
-            (updated request, publish_id) or (None, "") if not found/not PENDING
+            (updated request, igot_cbp_plan_id) or (None, "") if not found/not PENDING
         """
         # 1. Lock and fetch the request
         request = await crud_mdo_approval_request.get_pending_for_update(
@@ -100,8 +100,8 @@ class MDOApprovalController:
                 "cbp_plan_data may be empty or missing selected_courses."
             )
 
-        # 3. Call CBP API BEFORE any DB writes; raises HTTPException(502) on failure
-        publish_id_str = await call_cbp_create(
+        # 3. Call iGOT create + publish APIs BEFORE any DB writes; raises HTTPException(502) on failure
+        igot_cbp_plan_id_str = await call_igot_create(
             token=token,
             org_id=request.state_center_id,
             plan_name=plan_name,
@@ -109,6 +109,12 @@ class MDOApprovalController:
             designations=designations,
             content_ids=content_ids,
             is_apar=False,
+        )
+
+        await call_igot_publish(
+            token=token,
+            org_id=request.state_center_id,
+            plan_id=igot_cbp_plan_id_str,
         )
 
         # 4. Persist all DB changes (approve request, create audit rows, approve items)
@@ -119,10 +125,10 @@ class MDOApprovalController:
             mdo_id=mdo_id,
             plan_name=plan_name,
             due_date=due_date,
-            publish_id_str=publish_id_str,
+            igot_cbp_plan_id_str=igot_cbp_plan_id_str,
         )
 
-        return updated, publish_id_str
+        return updated, igot_cbp_plan_id_str
 
     async def reject_request(
         self,

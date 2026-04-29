@@ -24,7 +24,8 @@ class Settings(BaseSettings):
 
     REQUIRED_ROLE: str = "PUBLIC" # set "cbp_creator" for production
 
-    CBP_API_KEY: bool = False  # set True in .env to skip the real CBP API call
+    KB_BASE_URL: str = "https://portal.dev.karmayogibharat.net"
+    KB_AUTH_TOKEN: str = ""
 
     DATABASE_URL: str
 

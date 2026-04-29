@@ -30,21 +30,23 @@ router = APIRouter(
 )
 
 
-@router.get("/approval-requests/list", response_model=PaginatedApprovalRequestsResponse, dependencies=[Depends(require_cbp_creator)])
+@router.get("/approval-requests/list", response_model=PaginatedApprovalRequestsResponse)
 async def get_approval_requests(
-    mdo_id: str = Query(..., description="MDO ID of the logged-in MDO admin"),
     page: int = Query(1, ge=1, description="Page number (starts from 1)"),
     page_size: int = Query(10, ge=1, le=100, description="Number of items per page"),
     search: Optional[str] = Query(None, description="Search by request name or state/center name"),
     status_filter: Optional[str] = Query(None, description="Filter by status (pending, approved, rejected)"),
     from_date: Optional[str] = Query(None, description="Filter from date (YYYY-MM-DD)"),
     to_date: Optional[str] = Query(None, description="Filter to date (YYYY-MM-DD)"),
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_db_session),
+    auth: tuple = Depends(require_cbp_creator),
 ):
     """
     Get paginated list of approval requests for the MDO.
     Supports search and filtering by status and date range.
     """
+    mdo_id = auth[0]
+    print(mdo_id)
     try:
         items, total_count = await mdo_approval_controller.list_requests(
             db=db,
@@ -84,15 +86,16 @@ async def get_approval_requests(
         )
 
 
-@router.get("/approval-requests/{request_id}", response_model=ApprovalRequestDetail, dependencies=[Depends(require_cbp_creator)])
+@router.get("/approval-requests/{request_id}", response_model=ApprovalRequestDetail)
 async def get_approval_request_detail(
     request_id: UUID,
-    mdo_id: str = Query(..., description="MDO ID of the logged-in MDO admin"),
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_db_session),
+    auth: tuple = Depends(require_cbp_creator),
 ):
     """
     Get detailed view of a specific approval request with all items.
     """
+    mdo_id = auth[0]
     try:
         request = await mdo_approval_controller.get_request_detail(
             db=db, request_id=request_id, mdo_id=mdo_id
@@ -116,20 +119,19 @@ async def get_approval_request_detail(
         )
 
 
-@router.post("/approval-requests/approve_and_publish", response_model=ApprovalActionResponse)
-async def approve_and_publish_request(
+@router.post("/approval-requests/publish", response_model=ApprovalActionResponse)
+async def publish_request(
     body: ApproveRequestBody,
-    mdo_id: str = Query(..., description="MDO ID of the logged-in MDO admin"),
     db: AsyncSession = Depends(get_db_session),
     auth: tuple = Depends(require_cbp_creator),
 ):
     """
     Approve all items in an approval request, create a CBP plan via the
-    external API, and persist the returned publish_id against each MdoApproval row.
+    external API, and persist the returned igot_cbp_plan_id against each MdoApproval row.
     """
-    _user_id, token = auth
+    mdo_id, token = auth
     try:
-        updated_request, publish_id_str = await mdo_approval_controller.approve_and_publish(
+        updated_request, igot_cbp_plan_id_str = await mdo_approval_controller.publish(
             db=db,
             request_id=body.request_id,
             mdo_id=mdo_id,
@@ -149,7 +151,7 @@ async def approve_and_publish_request(
 
         logger.info(
             f"Approved {items_processed} item(s) for request {body.request_id} | "
-            f"publish_id={publish_id_str}"
+            f"igot_cbp_plan_id={igot_cbp_plan_id_str}"
         )
 
         return ApprovalActionResponse(
@@ -157,28 +159,29 @@ async def approve_and_publish_request(
             request_status="approved",
             items_processed=items_processed,
             item_ids=item_ids,
-            publish_id=publish_id_str,
+            igot_cbp_plan_id=igot_cbp_plan_id_str,
         )
 
     except HTTPException:
         raise
     except Exception:
-        logger.exception("Error in approve_and_publish_request")
+        logger.exception("Error in publish_request")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to approve and publish request.",
+            detail="Failed to publish request.",
         )
 
 
-@router.post("/approval-requests/reject", response_model=RejectActionResponse, dependencies=[Depends(require_cbp_creator)])
+@router.post("/approval-requests/reject", response_model=RejectActionResponse)
 async def reject_request(
     body: RejectRequestBody,
-    mdo_id: str = Query(..., description="MDO ID of the logged-in MDO admin"),
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_db_session),
+    auth: tuple = Depends(require_cbp_creator),
 ):
     """
     Reject all items in an approval request.
     """
+    mdo_id = auth[0]
     try:
         updated_request, items_count = await mdo_approval_controller.reject_request(
             db=db,
@@ -214,15 +217,16 @@ async def reject_request(
         )
 
 
-@router.post("/approval-requests/items/reject", dependencies=[Depends(require_cbp_creator)])
+@router.post("/approval-requests/items/reject")
 async def reject_approval_request_item(
     body: RejectItemBody,
-    mdo_id: str = Query(..., description="MDO ID of the logged-in MDO admin"),
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_db_session),
+    auth: tuple = Depends(require_cbp_creator),
 ):
     """
     Reject a specific item in an approval request with comments.
     """
+    mdo_id = auth[0]
     try:
         result, error = await mdo_approval_controller.reject_single_item(
             db=db,

@@ -138,7 +138,7 @@ class ApprovalActionResponse(BaseModel):
     request_status: str
     items_processed: int
     item_ids: List[UUID]
-    publish_id: str
+    igot_cbp_plan_id: str
 
 
 class RejectActionResponse(BaseModel):

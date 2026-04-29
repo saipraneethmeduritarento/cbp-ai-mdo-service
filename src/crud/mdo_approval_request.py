@@ -146,16 +146,16 @@ class CRUDMDOApprovalRequest:
         mdo_id: str,
         plan_name: str,
         due_date: date,
-        publish_id_str: str,
+        igot_cbp_plan_id_str: str,
     ) -> Optional[ApprovalRequestRead]:
         """
         Persist approval: update request status, create MdoApproval audit rows,
         update item statuses. Caller must have already locked the row and
-        obtained publish_id from the external API.
+        obtained igot_cbp_plan_id from the external API.
 
         Returns the updated request.
         """
-        publish_id = uuid.UUID(publish_id_str)
+        igot_cbp_plan_id = uuid.UUID(igot_cbp_plan_id_str)
 
         # Update the approval request status
         await db.execute(
@@ -181,12 +181,10 @@ class CRUDMDOApprovalRequest:
                 MdoApproval(
                     approval_request_id=request_id,
                     approval_request_item_id=item.id,
-                    mdo_id=mdo_id,
-                    designation_name=item.designation_name,
                     plan_name=plan_name,
                     due_date=due_dt,
-                    user_id=request.user_id,
-                    publish_id=publish_id,
+                    igot_cbp_plan_id=igot_cbp_plan_id,
+                    created_at=datetime.now(timezone.utc) if igot_cbp_plan_id else None,
                 )
             )
             await db.execute(

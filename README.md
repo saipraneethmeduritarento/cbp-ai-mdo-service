@@ -1,80 +1,137 @@
 # MDO Approval System
 
-A FastAPI service for managing MDO (Ministry/Department/Organization) approval requests and workflows. This system allows MDO administrators to review, approve, or reject designation-based approval requests submitted through the iGOT platform.
+[![Python](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.111.0-009688.svg)](https://fastapi.tiangolo.com/)
+[![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.0_async-red.svg)](https://www.sqlalchemy.org/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-14+-336791.svg)](https://www.postgresql.org/)
+[![Docker](https://img.shields.io/badge/docker-ready-2496ED.svg)](https://www.docker.com/)
+[![iGOT](https://img.shields.io/badge/platform-iGOT-orange.svg)](https://igotkarmayogi.gov.in/)
+
+A FastAPI microservice that powers the **MDO-side approval workflow** for CBP (Competency-Based Plan) requests originating from the CBP portal.
+
+---
+
+## Table of Contents
+
+- [MDO Approval System](#mdo-approval-system)
+  - [Table of Contents](#table-of-contents)
+  - [Project Overview](#project-overview)
+  - [Project Structure](#project-structure)
+  - [Key Features](#key-features)
+  - [Tech Stack](#tech-stack)
+  - [Quick Start](#quick-start)
+    - [Prerequisites](#prerequisites)
+    - [Installation](#installation)
+    - [Environment Variables](#environment-variables)
+    - [Run Application](#run-application)
+  - [Run Using Docker](#run-using-docker)
+    - [Build \& Run](#build--run)
+    - [Common Docker Commands](#common-docker-commands)
+
+---
 
 ## Project Overview
 
-This system is part of the iGOT ecosystem and handles the approval workflow for designation requests. MDO administrators can view pending requests, review designation details with competencies and role responsibilities, and take approval actions. The system maintains audit trails and supports bulk operations for efficient processing.
+This service is the MDO-side approval layer of the iGOT ecosystem. The workflow begins on the CBP portal, where users create CBP plans linked to designations (with role responsibilities, activities, and competencies). These plans are submitted as approval requests and arrive in this service with a `PENDING` status, awaiting review by the responsible MDO administrator.
+
+**End-to-end flow:**
+
+```
+CBP Portal
+  └─ User creates CBP plan (designations + courses/competencies)
+       └─ Submits for approval → approval_request (PENDING) stored in DB
+            └─ MDO Admin reviews via this service
+                 ├─ APPROVE → calls iGOT CBP Create API + Publish API → status = APPROVED
+                 └─ REJECT  → stores rejection comments               → status = REJECTED
+```
+
+MDO administrators can view pending requests, drill into designation details, and take approval actions individually or in bulk. The system maintains a full audit trail of every action.
+
+---
 
 ## Project Structure
+
 ```
 src/
-├── main.py                      # FastAPI application entry point
+├── main.py                       # FastAPI application entry point
 ├── api/
 │   └── v1/
-│       └── mdo_approval.py      # MDO approval endpoints
+│       └── mdo_approval.py       # MDO approval endpoints
+├── controller/
+│   └── mdo_approval.py           # Business logic / orchestration layer
 ├── core/
-│   ├── configs.py               # Application configuration
-│   ├── database.py              # Database connection and session management
-│   ├── logger.py                # Logging configuration
-│   └── logging.conf             # Logging configuration file
+│   ├── configs.py                # Application configuration
+│   ├── database.py               # Database connection and session management
+│   ├── logger.py                 # Logging configuration
+│   └── logging.conf              # Logging configuration file
 ├── crud/
-│   └── mdo_approval_request.py  # Database operations for approval requests
+│   └── mdo_approval_request.py   # Database operations for approval requests
 ├── models/
-│   └── mdo_approval.py          # SQLAlchemy models for approval system
+│   └── mdo_approval.py           # SQLAlchemy models for approval system
 ├── schemas/
-│   ├── comman.py                # Common schemas and enums
-│   └── mdo_approval.py          # Pydantic schemas for API requests/responses
-├── services/
-│   └── cbp_service.py           # External CBP plan create API integration
-└── utils/                       # Utility functions
-pyproject.toml                   # Python project configuration
-Dockerfile                       # Container configuration
-.env                            # Environment variables
+│   ├── comman.py                 # Common schemas and enums
+│   └── mdo_approval.py           # Pydantic schemas for API requests/responses
+└── services/
+    └── igot_service.py           # iGOT CBP plan create & publish API integration
+pyproject.toml                    # Python project configuration
+Dockerfile                        # Container configuration
+.env                              # Environment variables
 ```
+
+---
 
 ## Key Features
 
-- **Approval Request Management**: View and manage pending approval requests from various departments
-- **Designation Review**: Detailed view of designations with role responsibilities, activities, and competencies
-- **CBP Plan Creation**: On approval, automatically calls the external CBP plan create API and stores the returned `publish_id`
-- **Bulk Approval Actions**: Approve or reject multiple designations in a single request
-- **Status Tracking**: Automatic status updates (`PENDING` → `APPROVED` / `REJECTED`)
-- **Search and Filtering**: Filter requests by status, date range, and search by name
-- **Audit Trail**: Complete tracking of approval actions with timestamps and comments
-- **Pagination Support**: Efficient handling of large datasets with paginated responses
+| Feature | Description |
+|---------|-------------|
+| **CBP → MDO Flow** | CBP plans from the CBP portal arrive as `PENDING` requests for MDO review |
+| **Designation Review** | Detailed view of designations with role responsibilities, activities, and competencies |
+| **Two-Step iGOT Integration** | On approval, calls the iGOT CBP **Create** API then the **Publish** API; stores the returned `publish_id` |
+| **Bulk Approval / Rejection** | Approve or reject all designations in a request in a single call |
+| **Item-Level Rejection** | Reject individual designations with specific reviewer comments |
+| **Status Tracking** | `PENDING` → `APPROVED` / `REJECTED` with automatic transitions |
+| **Search & Filtering** | Filter by status, date range, or search by request / org name |
+| **Audit Trail** | Full history of MDO actions with timestamps and comments |
+| **Pagination** | Efficient pagination for large datasets |
+
+---
 
 ## Tech Stack
 
-- **Framework**: FastAPI 0.111.0
-- **Database**: PostgreSQL with AsyncPG driver
-- **ORM**: SQLAlchemy 2.0 (async)
-- **Authentication**: JWT with python-jose
-- **Validation**: Pydantic v2
-- **Package Management**: uv (Python package manager)
-- **Containerization**: Docker
+| Layer | Technology |
+|-------|-----------|
+| Framework | FastAPI 0.111.0 |
+| Database | PostgreSQL 14+ with AsyncPG driver |
+| ORM | SQLAlchemy 2.0 (async) |
+| Auth | JWT via python-jose |
+| Validation | Pydantic v2 |
+| Package Manager | [uv](https://docs.astral.sh/uv/) |
+| Containerisation | Docker |
+
+---
 
 ## Quick Start
 
 ### Prerequisites
 
 - Python 3.12+
-- PostgreSQL 14+ with pgvector extension
-- [uv](https://docs.astral.sh/uv/) (Python package manager)
-- Docker (optional, for containerized deployment)
+- PostgreSQL 14+
+- [uv](https://docs.astral.sh/uv/) package manager
+- Docker *(optional, for containerised deployment)*
 
 ### Installation
 
 ```bash
 # Clone repository
 git clone <repository-url>
-cd mdo-approval-system
+cd cbp-ai-mdo-service
 
-# Install dependencies using uv
+# Install dependencies
 uv sync
 
 # Activate virtual environment
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+source .venv/bin/activate        # macOS / Linux
+# .venv\Scripts\activate         # Windows
 ```
 
 ### Environment Variables
@@ -83,9 +140,9 @@ Create a `.env` file in the project root:
 
 ```bash
 LOG_LEVEL="INFO"
-ENVIRONMENT="local"  # Options: local, staging, production
+ENVIRONMENT="local"              # local | staging | production
 
-# Application Settings
+# Application
 APP_NAME="MDO Approval System"
 APP_DESC="API for managing MDO approval requests"
 APP_VERSION="1.0.0"
@@ -97,33 +154,36 @@ DATABASE_URL="postgresql+asyncpg://user:password@localhost:5432/dbname"
 # JWT Authentication
 SECRET_KEY="your-secret-key-here"
 
-# Role required to access MDO endpoints (default: PUBLIC; set to cbp_creator in production)
+# Role required to access MDO endpoints
+# Default: PUBLIC — set to cbp_creator in staging/production
 REQUIRED_ROLE="cbp_creator"
 
-# CBP API Mock (set True to skip real CBP plan create call and return a dummy publish_id)
-CBP_API_KEY=False
+# iGOT / Karmayogi Bharat portal
+KB_BASE_URL="https://portal.dev.karmayogibharat.net"
+KB_AUTH_TOKEN="your-kb-auth-token-here"
 ```
+
+> **Note**: `KB_BASE_URL` and `KB_AUTH_TOKEN` are required for the approval (publish) flow. Without them, the iGOT Create and Publish API calls will fail.
 
 ### Run Application
 
 ```bash
-# Start development server with hot reload
 uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Access the API at: http://localhost:8000
+API available at: `http://localhost:8000`
+
+---
 
 ## Run Using Docker
 
-### Build Docker Image
+### Build & Run
 
 ```bash
+# Build image
 docker build -t mdo-approval-system .
-```
 
-### Run Container
-
-```bash
+# Run container
 docker run -d \
   --name mdo-approval-system \
   -p 8001:8001 \
@@ -131,210 +191,11 @@ docker run -d \
   mdo-approval-system
 ```
 
-### Docker Commands
+### Common Docker Commands
 
 ```bash
-# View logs
-docker logs -f mdo-approval-system
-
-# Stop container
-docker stop mdo-approval-system
-
-# Remove container
-docker rm mdo-approval-system
-
-# Restart container
-docker restart mdo-approval-system
+docker logs -f mdo-approval-system    # Stream logs
+docker stop mdo-approval-system       # Stop container
+docker rm mdo-approval-system         # Remove container
+docker restart mdo-approval-system    # Restart container
 ```
-## API Documentation
-
-- **Swagger UI**: `http://localhost:8000/docs` (disabled in production)
-- **ReDoc**: `http://localhost:8000/redoc` (disabled in production)
-- **OpenAPI JSON**: `http://localhost:8000/openapi.json` (disabled in production)
-
-## API Endpoints
-
-All endpoints are under `/api/v1/mdo` and require MDO authentication.
-
-### Approval Request Management
-
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/approval-requests/list` | Get paginated list of approval requests with search and filtering |
-| GET | `/approval-requests/{request_id}` | Get detailed view of specific approval request |
-| POST | `/approval-requests/approve_and_publish` | Approve all designations, create CBP plan, and store `publish_id` |
-| POST | `/approval-requests/reject` | Reject all designations in a request |
-| POST | `/approval-requests/items/reject` | Reject specific designation with comments |
-
-### Query Parameters
-
-**List Endpoint:**
-- `mdo_id` (required): MDO ID of the logged-in admin
-- `page`: Page number (default: 1)
-- `page_size`: Items per page (default: 10, max: 100)
-- `search`: Search by request name or state/center name
-- `status_filter`: Filter by status (`DRAFT`, `PENDING`, `APPROVED`, `REJECTED`)
-- `from_date`: Filter from date (YYYY-MM-DD)
-- `to_date`: Filter to date (YYYY-MM-DD)
-
-### Request Bodies
-
-**Approve Request:**
-```json
-{
-  "request_id": "uuid",
-  "plan_name": "Training Plan Name",
-  "due_date": "2024-12-31T23:59:59Z"
-}
-```
-
-**Reject Request:**
-```json
-{
-  "request_id": "uuid",
-  "rejection_comment": "Reason for rejection"
-}
-```
-
-**Reject Item:**
-```json
-{
-  "request_id": "uuid",
-  "item_id": "uuid",
-  "rejection_comment": "Specific reason for rejecting this designation"
-}
-```
-
-## Database Schema
-
-The system uses three main tables:
-
-### approval_requests
-Stores approval request metadata with organization context and status tracking.
-
-| Column | Type | Description |
-|---|---|---|
-| id | UUID | Primary key |
-| request_name | String(100) | Name of the approval request |
-| user_id | UUID | User who submitted the request |
-| org_type | String(20) | Organization type (ministry or state) |
-| state_center_id | String(255) | State or center identifier |
-| state_center_name | String(255) | Display name of the state or center |
-| department_id | String(255) | Department identifier (optional) |
-| department_name | String(255) | Display name of the department (optional) |
-| mdo_id | String(255) | MDO responsible for approval |
-| designation_count | Integer | Number of designations in request |
-| status | Enum | Request status (`DRAFT` / `PENDING` / `APPROVED` / `REJECTED`) |
-| reviewer_comments | Text | Comments left by the MDO reviewer (optional) |
-| rejected_at | DateTime | Timestamp when request was rejected (optional) |
-| revoked_at | DateTime | Timestamp when request was revoked (optional) |
-| created_at | DateTime | Creation timestamp |
-| updated_at | DateTime | Last update timestamp |
-
-### approval_request_items
-Stores individual designation details within each approval request.
-
-| Column | Type | Description |
-|---|---|---|
-| id | UUID | Primary key |
-| approval_request_id | UUID | Foreign key to approval_requests |
-| source_role_mapping_id | UUID | Reference to the originating role mapping |
-| designation_name | String(255) | Name of the designation |
-| wing_division_section | String(255) | Wing, division, or section (optional) |
-| role_responsibilities | JSONB | Role responsibilities data |
-| activities | JSONB | Activities data |
-| competencies | JSONB | Competencies data |
-| sort_order | Integer | Hierarchical sort order (optional) |
-| igot_designation_name | String(255) | Designation name as it exists in the iGOT portal (optional) |
-| igot_designation_id | String(255) | Designation ID from the iGOT portal (optional) |
-| cbp_plan_data | JSONB | CBP plan snapshot containing `selected_courses` with content identifiers |
-| status | Enum | Item status (`PENDING` / `APPROVED` / `REJECTED`) |
-| reviewer_comments | Text | Reviewer feedback for this item (optional) |
-| rejected_at | DateTime | Timestamp when item was rejected (optional) |
-| created_at | DateTime | Creation timestamp |
-
-### mdo_approval
-Tracks MDO approval actions for audit purposes. This service has full write ownership of this table.
-
-| Column | Type | Description |
-|---|---|---|
-| id | UUID | Primary key |
-| approval_request_id | UUID | Foreign key to approval_requests |
-| approval_request_item_id | UUID | Foreign key to approval_request_items |
-| mdo_id | String(255) | MDO who took action |
-| designation_name | String(255) | Denormalized designation name |
-| plan_name | String(200) | Associated training plan name |
-| due_date | DateTime | Plan due date |
-| user_id | UUID | Original request submitter |
-| publish_id | UUID | CBP plan ID returned by the external CBP create API (optional) |
-
-## Response Examples
-
-### Paginated List Response
-```json
-{
-  "items": [
-    {
-      "id": "uuid",
-      "request_name": "Q1 2024 Designations",
-      "state_center_name": "Karnataka",
-      "designation_count": 15,
-      "status": "pending",
-      "created_at": "2024-01-15T10:30:00Z"
-    }
-  ],
-  "pagination": {
-    "current_page": 1,
-    "page_size": 10,
-    "total_items": 50,
-    "total_pages": 5,
-    "has_next": true,
-    "has_prev": false
-  },
-  "filters": {
-    "search": null,
-    "status_filter": "pending",
-    "from_date": null,
-    "to_date": null
-  }
-}
-```
-
-### Approval Action Response
-```json
-{
-  "message": "CBP plan created successfully",
-  "request_status": "approved",
-  "items_processed": 15,
-  "item_ids": ["uuid1", "uuid2", ...],
-  "publish_id": "cbp-plan-uuid"
-}
-```
-
-## Troubleshooting
-
-### Database Connection Issues
-Ensure PostgreSQL is running and the `DATABASE_URL` is correctly formatted:
-```
-postgresql+asyncpg://user:password@host:port/dbname
-```
-
-### Port Already in Use
-If port 8000 or 8001 is already in use, specify a different port:
-```bash
-uvicorn src.main:app --reload --host 0.0.0.0 --port 8080
-```
-
-### JWT Token Issues
-Ensure the `SECRET_KEY` matches the one used for token generation. Tokens signed with a different key will be rejected.
-
-### Docker Build Failures
-If the Docker build fails on Playwright installation, ensure you have the required system dependencies:
-```bash
-docker build --build-arg PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=0 .
-```
-
-## License
-
-This project is part of the iGOT (Integrated Government Online Training) platform.
-
