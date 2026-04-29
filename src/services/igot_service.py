@@ -83,12 +83,6 @@ async def call_igot_create(
         "x-authenticated-user-orgid": org_id,
     }
 
-    logger.info(
-        f"Calling iGOT create API | org_id={org_id} | plan={plan_name} | "
-        f"courses={len(content_ids)} | designations={len(designations)}"
-    )
-    logger.info(f"iGOT create payload: {payload}")
-
     async with httpx.AsyncClient() as client:
         try:
             resp = await client.post(url, json=payload, headers=headers, timeout=30.0)
@@ -110,7 +104,6 @@ async def call_igot_create(
         logger.error(f"iGOT create API response missing result.id: {data}")
         raise HTTPException(status_code=502, detail="iGOT create API did not return a plan ID. Approval was not saved.")
 
-    logger.info(f"iGOT CBP plan created | plan_id={plan_id}")
     return plan_id
 
 
@@ -146,8 +139,6 @@ async def call_igot_publish(
         "x-authenticated-user-roles": ""
     }
 
-    logger.info(f"Calling iGOT publish API | plan_id={plan_id}")
-
     async with httpx.AsyncClient() as client:
         try:
             resp = await client.post(url, json=payload, headers=headers, timeout=30.0)
@@ -163,5 +154,4 @@ async def call_igot_publish(
             raise HTTPException(status_code=502, detail="iGOT publish API is unreachable. Publish failed.")
 
     data = resp.json()
-    logger.info(f"iGOT CBP plan published | plan_id={plan_id}")
     return data

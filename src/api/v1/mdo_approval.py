@@ -46,7 +46,6 @@ async def get_approval_requests(
     Supports search and filtering by status and date range.
     """
     mdo_id = auth[0]
-    print(mdo_id)
     try:
         items, total_count = await mdo_approval_controller.list_requests(
             db=db,
