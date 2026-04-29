@@ -11,6 +11,7 @@ logging.config.fileConfig(os.path.join(os.path.dirname(__file__), "logging.conf"
 # Configure the logger
 logger = logging.getLogger("mdo_service")
 logger.setLevel(settings.LOG_LEVEL)
+<<<<<<< HEAD
 
 # Example usage
 # logger.debug("This is a debug message.")
@@ -18,3 +19,5 @@ logger.setLevel(settings.LOG_LEVEL)
 # logger.warning("This is a warning message.")
 # logger.error("This is an error message.")
 # logger.critical("This is a critical message.")
+=======
+>>>>>>> 4da6dff (Refactor code structure for improved readability and maintainability)

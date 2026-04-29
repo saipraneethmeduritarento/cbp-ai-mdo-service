@@ -86,7 +86,11 @@ Dockerfile                        # Container configuration
 |---------|-------------|
 | **CBP → MDO Flow** | CBP plans from the CBP portal arrive as `PENDING` requests for MDO review |
 | **Designation Review** | Detailed view of designations with role responsibilities, activities, and competencies |
+<<<<<<< HEAD
 | **Two-Step iGOT Integration** | On approval, calls the iGOT CBP **Create** API then the **Publish** API; stores the returned `publish_id` |
+=======
+| **Two-Step iGOT Integration** | On approval, calls the iGOT CBP **Create** API then the **Publish** API; stores the returned `igot_cbp_plan_id` |
+>>>>>>> 4da6dff (Refactor code structure for improved readability and maintainability)
 | **Bulk Approval / Rejection** | Approve or reject all designations in a request in a single call |
 | **Item-Level Rejection** | Reject individual designations with specific reviewer comments |
 | **Status Tracking** | `PENDING` → `APPROVED` / `REJECTED` with automatic transitions |
@@ -155,8 +159,13 @@ DATABASE_URL="postgresql+asyncpg://user:password@localhost:5432/dbname"
 SECRET_KEY="your-secret-key-here"
 
 # Role required to access MDO endpoints
+<<<<<<< HEAD
 # Default: PUBLIC — set to MDO_ADMIN and MDO_LEADER in staging/production
 REQUIRED_ROLES='["MDO_ADMIN", "MDO_LEADER"]'
+=======
+# Default: PUBLIC — set to cbp_creator in staging/production
+REQUIRED_ROLE="cbp_creator"
+>>>>>>> 4da6dff (Refactor code structure for improved readability and maintainability)
 
 # iGOT / Karmayogi Bharat portal
 KB_BASE_URL="https://portal.dev.karmayogibharat.net"

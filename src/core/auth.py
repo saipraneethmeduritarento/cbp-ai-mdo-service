@@ -39,8 +39,11 @@ def require_cbp_creator(
     """
     token = credentials.credentials
 
+<<<<<<< HEAD
     logger.debug(f"Auth token (first 50 chars): {token[:50]}...")
 
+=======
+>>>>>>> 4da6dff (Refactor code structure for improved readability and maintainability)
     # Extract kid from unverified header
     try:
         unverified_header = jwt.get_unverified_header(token)
@@ -90,10 +93,17 @@ def require_cbp_creator(
 
     # Enforce required role
     user_roles = decoded.get("user_roles", [])
+<<<<<<< HEAD
     if not any(role in user_roles for role in settings.REQUIRED_ROLES):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,  
             detail="You do not have the required role to perform this action.",
+=======
+    if settings.REQUIRED_ROLE not in user_roles:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Access denied: '{settings.REQUIRED_ROLE}' role required.",
+>>>>>>> 4da6dff (Refactor code structure for improved readability and maintainability)
         )
 
     # Extract the actual user ID from the sub claim and return with token
