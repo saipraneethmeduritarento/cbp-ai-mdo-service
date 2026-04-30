@@ -58,23 +58,12 @@ async def get_approval_requests(
             to_date=to_date
         )
 
-        total_pages = (total_count + page_size - 1) // page_size
-
         return PaginatedApprovalRequestsResponse(
             items=[ApprovalRequestListItem.model_validate(item) for item in items],
             pagination=PaginationMetadata(
                 current_page=page,
                 page_size=page_size,
-                total_items=total_count,
-                total_pages=total_pages,
-                has_next=page < total_pages,
-                has_prev=page > 1
-            ),
-            filters=ApprovalRequestFilters(
-                search=search,
-                status_filter=status_filter,
-                from_date=from_date,
-                to_date=to_date
+                total_items=total_count
             )
         )
     except Exception:

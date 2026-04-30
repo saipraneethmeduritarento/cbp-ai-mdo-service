@@ -13,16 +13,10 @@ COPY pyproject.toml* uv.lock* ./
  
 # Install dependencies using uv
 RUN uv sync --frozen --no-cache
-COPY ./data /app/data
 COPY ./src /app/src
-COPY ./templates /app/templates
-
-
-RUN uv pip install playwright && \
-    uv run playwright install --with-deps chromium
  
-# Expose the Fastapi port (default: 8001)
-EXPOSE 8001
+# Expose the Fastapi port (default: 8000)
+EXPOSE 8000
  
 # Run the application.
-CMD ["/app/.venv/bin/uvicorn", "src.main:app", "--port", "8001", "--host", "0.0.0.0",  "--timeout-keep-alive", "500", "--workers", "4"]
+CMD ["/app/.venv/bin/uvicorn", "src.main:app", "--port", "8000", "--host", "0.0.0.0"]

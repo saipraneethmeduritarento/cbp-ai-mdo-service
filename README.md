@@ -1,4 +1,4 @@
-# MDO Approval System
+# AI CBP MDO Service
 
 [![Python](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.111.0-009688.svg)](https://fastapi.tiangolo.com/)
@@ -7,7 +7,7 @@
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED.svg)](https://www.docker.com/)
 [![iGOT](https://img.shields.io/badge/platform-iGOT-orange.svg)](https://igotkarmayogi.gov.in/)
 
-A FastAPI microservice that powers the **MDO-side approval workflow** for CBP (Competency-Based Plan) requests originating from the CBP portal.
+A FastAPI microservice that powers the **MDO-side approval workflow** for CBP (Competency-Based Plan) requests originating from the AI CBP standalone portal.
 
 ---
 
@@ -32,7 +32,7 @@ A FastAPI microservice that powers the **MDO-side approval workflow** for CBP (C
 
 ## Project Overview
 
-This service is the MDO-side approval layer of the iGOT ecosystem. The workflow begins on the CBP portal, where users create CBP plans linked to designations (with role responsibilities, activities, and competencies). These plans are submitted as approval requests and arrive in this service with a `PENDING` status, awaiting review by the responsible MDO administrator.
+This service is the MDO-side approval layer of the iGOT ecosystem. The workflow begins on the AI CBP standalone portal, where users create CBP plans linked to designations (with role responsibilities, activities, and competencies). These plans are submitted as approval requests and arrive in this service with a `PENDING` status, awaiting review by the responsible MDO administrator.
 
 **End-to-end flow:**
 
@@ -146,17 +146,8 @@ Create a `.env` file in the project root:
 LOG_LEVEL="INFO"
 ENVIRONMENT="local"              # local | staging | production
 
-# Application
-APP_NAME="MDO Approval System"
-APP_DESC="API for managing MDO approval requests"
-APP_VERSION="1.0.0"
-APP_ROOT_PATH="/mdo-tpc-ai"
-
 # Database
 DATABASE_URL="postgresql+asyncpg://user:password@localhost:5432/dbname"
-
-# JWT Authentication
-SECRET_KEY="your-secret-key-here"
 
 # Role required to access MDO endpoints
 <<<<<<< HEAD
@@ -195,7 +186,7 @@ docker build -t mdo-approval-system .
 # Run container
 docker run -d \
   --name mdo-approval-system \
-  -p 8001:8001 \
+  -p 8000:8000 \
   --env-file .env \
   mdo-approval-system
 ```
