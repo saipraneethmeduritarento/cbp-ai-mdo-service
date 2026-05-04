@@ -155,8 +155,8 @@ DATABASE_URL="postgresql+asyncpg://user:password@localhost:5432/dbname"
 SECRET_KEY="your-secret-key-here"
 
 # Role required to access MDO endpoints
-# Default: PUBLIC — set to cbp_creator in staging/production
-REQUIRED_ROLE="cbp_creator"
+# Default: PUBLIC — set to MDO_ADMIN and MDO_LEADER in staging/production
+REQUIRED_ROLES='["MDO_ADMIN", "MDO_LEADER"]'
 
 # iGOT / Karmayogi Bharat portal
 KB_BASE_URL="https://portal.dev.karmayogibharat.net"
